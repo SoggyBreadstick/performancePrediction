@@ -1,4 +1,5 @@
 import pandas as pd
+from sklearn.preprocessing import StandardScaler
 
 df = pd.read_csv("data/raw/players_data_light-2025_2026.csv")
 
@@ -51,3 +52,30 @@ print(df.head())
 
 df.to_csv("data/processed/players_cleaned.csv", index=False)
 print("\nSaved cleaned modeling dataset to data/processed/players_cleaned.csv")
+
+index_cols = ["Gls", "Ast", "SoT/90", "G/Sh", "TklW", "Int", "Fld"]
+
+scaler = StandardScaler()
+scaled_values = scaler.fit_transform(df[index_cols])
+
+scaled_df = pd.DataFrame(
+    scaled_values,
+    columns=[col + "_z" for col in index_cols]
+)
+
+#z-score columns
+df = pd.concat([df.reset_index(drop=True), scaled_df], axis=1)
+
+#composite performance index
+df["performance_index"] = (
+    df["Gls_z"] + df["Ast_z"] + df["SoT/90_z"] +
+    df["G/Sh_z"] + df["TklW_z"] + df["Int_z"] +
+    df["Fld_z"]
+) / 7
+
+print("\nPerformance index summary:")
+print(df["performance_index"].describe())
+
+#save new dataset
+df.to_csv("data/processed/players_performance_index.csv", index=False)
+print("\nSaved dataset with performance index to data/processed/players_performance_index.csv")
