@@ -1,7 +1,7 @@
 ---
 title: "ModelReady"
 author: "Kaydon Lee"
-date: "2026-03-09"
+date: "2026-03-18"
 output: html_document
 ---
 
@@ -27,6 +27,8 @@ glimpse(df)
 ```
 ## Data Splitting and Cross-Validation
 ```{r}
+set.seed(131231)
+
 data_split <- initial_split(df, prop = 0.8)
 player_train <- training(data_split)
 player_test <- testing(data_split)
@@ -38,13 +40,13 @@ nrow(player_test)
 cv_folds <- vfold_cv(player_train, v = 5)
 
 player_recipe <- recipe(performance_index ~., data = player_train) |>
-  update_role(Player, Nation, Squad, new_role = "id") |> #not used as predictors
+  update_role(Player, Nation, Squad, Age, Born, Min, `90s`, new_role = "id") |> #not used as predictors
   step_dummy(all_nominal_predictors()) |> #categorical -> dummy variables
   step_zv(all_predictors()) |> #removes predictors w/ 0 variance
   step_normalize(all_numeric_predictors()) 
 ```
 
-## Linear Regression Model
+## 1. Linear Regression Model
 ```{r}
 lm_spec <- linear_reg() |>
   set_engine("lm")
@@ -64,6 +66,7 @@ lm_metrics <- metrics(lm_prediction,
                       estimate = .pred) |>
   mutate(model = "Linear Regression")
 ```
+
 ## 2. KNN Regression
 ```{r}
 knn_spec <- nearest_neighbor(
@@ -125,7 +128,8 @@ ridge_tune <- tune_grid( # okay to use ridge_tune instead of ridge_tuned
   grid = ridge_grid,
   metrics = metric_set(rmse, mae, rsq))
 
-best_ridge <- select_best(ridge_tune, metric = "rmse")
+best_ridge <- select_best(ridge_tune,
+                          metric = "rmse")
 
 ridge_final <- finalize_workflow(ridge_workflow, best_ridge) |>
   fit(data = player_train)
@@ -139,3 +143,80 @@ ridge_metrics <- metrics(ridge_prediction,
                          estimate = .pred) |>
   mutate(model = "Ridge Regression")
 ```
+
+## 4. Random Forest
+```{r}
+rf_spec <- rand_forest(
+  mtry = tune(),
+  min_n = tune(),
+  trees = 500) |>
+  set_engine("ranger", importance = "impurity") |>
+  set_mode("regression")
+
+rf_workflow <- workflow() |>
+  add_recipe(player_recipe) |>
+  add_model(rf_spec)
+
+rf_grid <- grid_regular(
+  mtry(range = c(2L, 10L)),
+  min_n(range = c(2L, 20L)),
+  levels = 5)
+
+rf_tune <- tune_grid(
+  rf_workflow,
+  resamples = cv_folds,
+  grid = rf_grid,
+  metrics = metric_set(rmse, mae, rsq))
+
+best_rf <- select_best(rf_tune, 
+                       metric = "rmse")
+
+rf_final <- finalize_workflow(rf_workflow, best_rf) |>
+  fit(data = player_train)
+
+rf_prediction <- predict(rf_final, player_test) |>
+  bind_cols(player_test |>
+              select(performance_index))
+
+rf_metrics <- metrics(rf_prediction,
+                      truth = performance_index,
+                      estimate = .pred) |>
+  mutate(model = "Random Forest")
+```
+
+## 5. Comparison of Models
+```{r}
+combined_metrics <- bind_rows(lm_metrics,
+                              knn_metrics,
+                              ridge_metrics,
+                              rf_metrics)
+rmse_table <- combined_metrics |>
+  filter(.metric == "rmse") |>
+  arrange(.estimate)
+
+prediction <- list(
+  "Linear Regression" = lm_prediction,
+  "KNN Regression" = knn_prediction,
+  "Ridge Regression" = ridge_prediction,
+  "Random Forest" = rf_prediction)
+
+best_model <- rmse_table$model[1]
+best_prediction <- prediction[[best_model]]
+
+best_model
+best_prediction
+```
+
+
+```{r}
+ggplot(best_prediction, aes(x = performance_index,
+                            y = .pred)) +
+  geom_point(alpha = 0.6) +
+  geom_abline(slope = 1, intercept = 0, color = "red") +
+  labs(x = "Actual performance_index",
+       y = "Predicted performance_index",
+       title = paste("Predicted vs Actual:", best_model)
+  )
+```
+
+ 
