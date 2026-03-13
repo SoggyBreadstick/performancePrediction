@@ -1,0 +1,67 @@
+---
+title: "ModelReady"
+author: "Kaydon Lee"
+date: "2026-03-09"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
+```
+
+```{r}
+library(tidyverse)
+library(tidymodels)
+```
+
+```{r}
+df <- read_csv("/Users/seunglee/Downloads/performancePrediction/data/processed/model.csv")
+
+df <- df |>
+  mutate(
+    Pos = as.factor(Pos),
+    Comp = as.factor(Comp)
+  )
+
+glimpse(df)
+```
+## Data Splitting and Cross-Validation
+```{r}
+data_split <- initial_split(df, prop = 0.8)
+player_train <- training(data_split)
+player_test <- testing(data_split)
+
+nrow(player_train)
+nrow(player_test)
+```
+```{r}
+cv_folds <- vfold_cv(player_train, v = 5)
+
+player_recipe <- recipe(performance_index ~., data = player_train) |>
+  update_role(Player, Nation, Squad, new_role = "id") |> #not used as predictors
+  step_dummy(all_nominal_predictors()) |> #categorical -> dummy variables
+  step_zv(all_predictors()) |> #removes predictors w/ 0 variance
+  step_normalize(all_numeric_predictors()) 
+```
+
+## Linear Regression Model
+```{r}
+lm_spec <- linear_reg() |>
+  set_engine("lm")
+
+lm_workflow <- workflow() |>
+  add_recipe(player_recipe) |>
+  add_model(lm_spec)
+
+lm_fit <- fit(lm_workflow, data = player_train)
+
+lm_prediction <- predict(lm_fit, player_test) |> 
+                           bind_cols(player_test |>
+              select(performance_index))
+
+lm_metrics <- metrics(lm_prediction,
+                      truth = performance_index,
+                      estimate = .pred) |>
+  mutate(model = "Linear Regression")
+```
+

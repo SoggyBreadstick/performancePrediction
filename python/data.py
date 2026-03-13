@@ -79,3 +79,32 @@ print(df["performance_index"].describe())
 #save new dataset
 df.to_csv("data/processed/players_performance_index.csv", index=False)
 print("\nSaved dataset with performance index to data/processed/players_performance_index.csv")
+
+#top 10 players by performance index
+print("\nTop 10 players by Performance index:")
+print(df[["Player", "Squad", "Pos", "performance_index"]]
+      .sort_values("performance_index", ascending=False)
+      .head(10))
+
+#bottom 10 players by performance index
+print("\nBottom 10 players by Performance index:")
+print(df[["Player", "Squad", "Pos", "performance_index"]]
+      .sort_values("performance_index", ascending=True)
+      .head(10))
+
+#model dataset
+model_cols = [
+    "Player", "Nation", "Pos", "Squad", "Comp", "Age", "Born",
+    "MP", "Starts", "Min", "90s",
+    "Sh", "SoT", "SoT%", "PK", "PKatt",
+    "CrdY", "CrdR", "Fls", "Crs", "OG", "2CrdY",
+    "performance_index"
+]
+
+model_df = df[model_cols].copy()
+
+print("\nModel-ready dataset shape:", model_df.shape)
+print(model_df.head())
+
+model_df.to_csv("data/processed/model.csv", index=False)
+print("\nSaved model-ready dataset to data/processed/model.csv")
