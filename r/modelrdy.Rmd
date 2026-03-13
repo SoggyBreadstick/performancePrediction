@@ -64,4 +64,78 @@ lm_metrics <- metrics(lm_prediction,
                       estimate = .pred) |>
   mutate(model = "Linear Regression")
 ```
+## 2. KNN Regression
+```{r}
+knn_spec <- nearest_neighbor(
+  neighbors = tune(),
+  weight_func = "rectangular",
+  dist_power = 2) |>
+  set_engine("kknn") |>
+  set_mode("regression")
 
+knn_workflow <- workflow() |>
+  add_recipe(player_recipe) |>
+  add_model(knn_spec)
+
+knn_grid <- grid_regular(neighbors(range = c(3,25)), 
+                         levels = 10)
+
+knn_tune <- tune_grid(
+  knn_workflow,
+  resamples = cv_folds,
+  grid = knn_grid,
+  metrics = metric_set(rmse, mae, rsq)
+)
+
+best_knn <- select_best(knn_tune, 
+                        metric = "rmse")
+
+knn_final <- finalize_workflow(knn_workflow, best_knn) |>
+  fit(data = player_train)
+
+knn_prediction <- predict(knn_final, player_test) |>
+  bind_cols(player_test |>
+              select(performance_index))
+
+knn_metrics <- metrics(knn_prediction,
+                       truth = performance_index,
+                       estimate = .pred) |>
+  mutate(model = "KNN Regression")
+```
+
+## 3. Ridge Regression
+```{r}
+library(glmnet)
+
+ridge_spec <- linear_reg(
+  penalty = tune(),
+  mixture = 0) |>
+  set_engine("glmnet")
+
+ridge_workflow <- workflow() |>
+  add_recipe(player_recipe) |>
+  add_model(ridge_spec)
+
+ridge_grid <- grid_regular(penalty(range = c(-4,1)),
+                           levels = 20)
+
+ridge_tune <- tune_grid( # okay to use ridge_tune instead of ridge_tuned
+  ridge_workflow,
+  resamples = cv_folds,
+  grid = ridge_grid,
+  metrics = metric_set(rmse, mae, rsq))
+
+best_ridge <- select_best(ridge_tune, metric = "rmse")
+
+ridge_final <- finalize_workflow(ridge_workflow, best_ridge) |>
+  fit(data = player_train)
+
+ridge_prediction <- predict(ridge_final, player_test) |>
+  bind_cols(player_test |>
+              select(performance_index))
+
+ridge_metrics <- metrics(ridge_prediction,
+                         truth = performance_index,
+                         estimate = .pred) |>
+  mutate(model = "Ridge Regression")
+```
