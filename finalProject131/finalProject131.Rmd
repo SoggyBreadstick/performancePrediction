@@ -1,0 +1,353 @@
+---
+title: "Predicting a Composite Player Performance Index"
+author: "Kaydon Lee"
+date: "2026-03-18"
+output:
+  html_document:
+    toc: true
+    toc_depth: 3
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
+```
+
+# Introduction
+Soccer player evaluation is difficult because player's performances on the soccer pitch depend on many aspects of the game. Whether it is scoring, chance creation, shooting efficiency, or defensive contributions, a single raw statistic does not capture a player's impact throughout a season. It is for this reason that this project takes an approach utilizing data to summarize a player's performance and seeing how well said summary can be predicted utilizing the method of supervised machine learning.
+
+The dataset used in this project is from the Kaggle dataset "Football Player Stats 2025-2026, which is based on FBref data from the Big 5 European Leagues: English Premier League, Spanish La Liga, German Bundesliga, Italy's Serie A, and France's Ligue 1. You can find the dataset here: [Football Player Statistics 2025-2026](https://www.kaggle.com/datasets/hubertsidorowicz/football-players-stats-2025-2026).
+
+I used the players_data_light-2025_2026.csv which contains a streamlined set of player stats ranging from basic player information, playing time, attacking & defensive statistics, yellow & red cards, etc. Wanting to only analyze outfield players with reputable data I filtered out players with fewer than 900 minutes, the final modeling dataset containing 1,072 outfield players.
+
+Research Question: "How well can season-level statistics predict composite player performance measure?" I constructed a performance index based on goals, assists, shots on target per 90 minutes, goals per shot, tackles won, interceptions, and fouls drawn. These statistics were standardized and combined into a season-level outcome variable. The goal of the project is to investigate whether patterns in player statistics can be used to predict performance and to compare how well different regression models perform on that task. The different regression models use are Linear Regression, KNN regression (K-nearest neighbors), Ridge Regression, and Random Forest Regression using training/testing splits and cv folds.
+
+```{r}
+library(tidyverse)
+library(tidymodels)
+```
+
+# Exploratory Data Analysis
+
+This section looks at the cleaned player dataset model.csv where goalkeepers and players who played less than 900 minutes this season were filtered out. Here we examine variation within variables and the relationships between said variables. 1. How does the distribution of the constructed performance index look? 2. How does performance vary across positions? 3. What is the relationship between the performance index and attacking shot volume? 4. Which players rank highest and lowest in the performance_index?
+
+### 1. Distribution of perfomance_index
+
+```{r}
+eda_df <- read_csv("../data/processed/players_performance_index.csv", show_col_types = FALSE) |>
+  mutate(
+    Pos = as.factor(Pos),
+    Comp = as.factor(Comp))
+
+ggplot(eda_df, 
+       aes(x = performance_index)) +
+  geom_histogram(bins = 30) +
+  labs(x = "performance_index",
+       y = "Count",
+       title = "Distribution of performance_index")
+
+```
+
+*_This histogram shows the distribution of the performance_index for the players in the processed dataset. The distribution is slightly skewed to the right which suggests a small number of players have strong overall performance compared to the rest of the sample. _*
+
+### 2. performance_index by Position
+
+```{r}
+ggplot(eda_df, aes(x = Pos,
+                   y = performance_index)) +
+  geom_boxplot() +
+  labs(
+    title = "performance_index by Position",
+    x = "Given Position",
+    y = "performance_index") 
+```
+
+*_The performance_index by position varies across different position groups as players in attacking roles like forwards and forward,midfielders generally have higher median performance_index values and more defensively-oriented roles like defenders and midfield,defenders tend to have lower ones. This makes sense due to the fact that the performance_index gives bigger weight to offensive production._*
+
+### 3. Relationship between performance_index and Shots : Scoring Statistics
+
+```{r}
+library(plotly)
+
+fit <- lm(performance_index ~ Sh, data = eda_df)
+slope <- coef(fit)[2]
+intercept <- coef(fit)[1]
+
+p <- ggplot(eda_df, aes(x = Sh, y = performance_index,
+    text = paste("Player:", Player,
+                 "<br>Squad:", Squad,
+                 "<br>Position:", Pos,
+                 "<br>Total Shots:", Sh,
+                 "<br>Performance Index:", round(performance_index, 3)))) +
+  geom_point(alpha = 0.5) +
+  geom_abline(slope = slope, intercept = intercept, color = "blue") +
+  labs(x = "Total Shots",
+       y = "performance_index",
+       title = "performance_index vs. Total Shots")
+
+ggplotly(p, tooltip = "text")
+```
+
+*_This scatter plot has a positive relationship between total shots and the performance_index. Players who take more shots generally have a higher performance_index value, but there is still a lot of variation around the line. This suggests that total_shots is integral to player performance, but is not the only factor that contributes to the index itself. _*
+
+### 4. Top & Bottom Players by performance_index
+```{r}
+top2bottom <- bind_rows(
+  eda_df |>
+    select(Player, Squad, Pos, performance_index) |>
+    arrange(desc(performance_index)) |>
+    head(5) |>
+    mutate(group = "Top 5"),
+  
+  eda_df |>
+    select(Player, Squad, Pos, performance_index) |>
+    arrange(performance_index) |>
+    head(5) |>
+    mutate(group = "Bottom 5")
+)
+
+knitr::kable(
+  top2bottom,
+  digits = 3,
+  caption = "Top and Bottom Players by Performance Index"
+)
+```
+*_The top 5 players are word-class players such as Harry Kane, Michael Olise, Lamine Yamal, Erling Haaland, Luis Diaz: all people who generate the most offensive output and all around statistical performance. The bottom five players are lower-output/defender players who are unfortunately having a worse season.  _*
+
+# Model Fitting/Data Splitting and Cross-Validation
+```{r}
+df <- read_csv("../data/processed/model.csv")
+
+df <- df |>
+  mutate(
+    Pos = as.factor(Pos),
+    Comp = as.factor(Comp)
+  )
+
+glimpse(df)
+```
+
+```{r}
+set.seed(131231)
+
+data_split <- initial_split(df, prop = 0.8)
+player_train <- training(data_split)
+player_test <- testing(data_split)
+
+nrow(player_train)
+nrow(player_test)
+```
+
+```{r}
+cv_folds <- vfold_cv(player_train, v = 5)
+
+player_recipe <- recipe(performance_index ~., data = player_train) |>
+  update_role(Player, Nation, Squad, Age, Min, `90s`, new_role = "id") |> #not used as predictors
+  step_dummy(all_nominal_predictors()) |> #categorical -> dummy variables
+  step_zv(all_predictors()) |> #removes predictors w/ 0 variance
+  step_normalize(all_numeric_predictors()) 
+```
+
+*_The data was split into an 80% training set and a 20% test set. Said training set was used to fit and tune models, while the test set was put aside to evaluate how well the final model would perform on the new data. A 5 fold cross-validation was used on the training data: training set was divided into five parts and each part took a turn being held out while the model was fit on the other four parts. Essentially, the idea is to use cross-validation for model selection and using separate test data to assess generalization performance._*
+
+## 1. Linear Regression Model
+```{r}
+lm_spec <- linear_reg() |>
+  set_engine("lm")
+
+lm_workflow <- workflow() |>
+  add_recipe(player_recipe) |>
+  add_model(lm_spec)
+
+lm_fit <- fit(lm_workflow, data = player_train)
+
+lm_prediction <- predict(lm_fit, player_test) |> 
+                           bind_cols(player_test |>
+              select(performance_index))
+
+lm_metrics <- metrics(lm_prediction,
+                      truth = performance_index,
+                      estimate = .pred) |>
+  mutate(model = "Linear Regression")
+```
+
+*_I used the standard "lm" engine with the preprocessing recipe applied to the training data. Since this model did not require tuning it serves as a baseline for comparison._*
+
+## 2. KNN Regression
+```{r}
+knn_spec <- nearest_neighbor(
+  neighbors = tune(),
+  weight_func = "rectangular",
+  dist_power = 2) |>
+  set_engine("kknn") |>
+  set_mode("regression")
+
+knn_workflow <- workflow() |>
+  add_recipe(player_recipe) |>
+  add_model(knn_spec)
+
+knn_grid <- grid_regular(neighbors(range = c(3,25)), 
+                         levels = 10)
+
+knn_tune <- tune_grid(
+  knn_workflow,
+  resamples = cv_folds,
+  grid = knn_grid,
+  metrics = metric_set(rmse, mae, rsq)
+)
+
+best_knn <- select_best(knn_tune, 
+                        metric = "rmse")
+
+knn_final <- finalize_workflow(knn_workflow, best_knn) |>
+  fit(data = player_train)
+
+knn_prediction <- predict(knn_final, player_test) |>
+  bind_cols(player_test |>
+              select(performance_index))
+
+knn_metrics <- metrics(knn_prediction,
+                       truth = performance_index,
+                       estimate = .pred) |>
+  mutate(model = "KNN Regression")
+```
+
+*_For KNN regression I utilized the "knn" engine with rectangular weighting and a Euclidean distance of (dist_power = 2). By tuning the number of neighbors on the grid from 3 to 25 over the 5-fold cross-validation as well as selecting the value that best minimized RMSE. _*
+
+## 3. Ridge Regression
+```{r}
+library(glmnet)
+
+ridge_spec <- linear_reg(
+  penalty = tune(),
+  mixture = 0) |>
+  set_engine("glmnet")
+
+ridge_workflow <- workflow() |>
+  add_recipe(player_recipe) |>
+  add_model(ridge_spec)
+
+ridge_grid <- grid_regular(penalty(range = c(-4,1)),
+                           levels = 20)
+
+ridge_tune <- tune_grid(
+  ridge_workflow,
+  resamples = cv_folds,
+  grid = ridge_grid,
+  metrics = metric_set(rmse, mae, rsq))
+
+best_ridge <- select_best(ridge_tune,
+                          metric = "rmse")
+
+ridge_final <- finalize_workflow(ridge_workflow, best_ridge) |>
+  fit(data = player_train)
+
+ridge_prediction <- predict(ridge_final, player_test) |>
+  bind_cols(player_test |>
+              select(performance_index))
+
+ridge_metrics <- metrics(ridge_prediction,
+                         truth = performance_index,
+                         estimate = .pred) |>
+  mutate(model = "Ridge Regression")
+```
+
+*_For ridge regression, I used the "glmnet" engine with mixture = 0, corresponding to pure ridge regularization. The penalty parameter was tuned over a grid of values and the best value was chosen using cross-validation RMSE._*
+
+## 4. Random Forest
+```{r}
+rf_spec <- rand_forest(
+  mtry = tune(),
+  min_n = tune(),
+  trees = 500) |>
+  set_engine("ranger", importance = "impurity") |>
+  set_mode("regression")
+
+rf_workflow <- workflow() |>
+  add_recipe(player_recipe) |>
+  add_model(rf_spec)
+
+rf_grid <- grid_regular(
+  mtry(range = c(2L, 10L)),
+  min_n(range = c(2L, 20L)),
+  levels = 5)
+
+rf_tune <- tune_grid(
+  rf_workflow,
+  resamples = cv_folds,
+  grid = rf_grid,
+  metrics = metric_set(rmse, mae, rsq))
+
+best_rf <- select_best(rf_tune, 
+                       metric = "rmse")
+
+rf_final <- finalize_workflow(rf_workflow, best_rf) |>
+  fit(data = player_train)
+
+rf_prediction <- predict(rf_final, player_test) |>
+  bind_cols(player_test |>
+              select(performance_index))
+
+rf_metrics <- metrics(rf_prediction,
+                      truth = performance_index,
+                      estimate = .pred) |>
+  mutate(model = "Random Forest")
+```
+
+*_The random forest model used the "ranger" engine with trees = 500. I tuned mtry and min_n using cross_validation and it was evident that this model had more flexible relationships and interactions between predictors._*
+
+## 5. Comparison of Models
+```{r}
+combined_metrics <- bind_rows(lm_metrics,
+                              knn_metrics,
+                              ridge_metrics,
+                              rf_metrics)
+```
+# Model Selection & Performance
+```{r}
+rmse_table <- combined_metrics |>
+  filter(.metric == "rmse") |>
+  arrange(.estimate)
+
+rmse_table
+```
+*_To compare the models I evaluated test-set RMSE, MAE and R^2. The best model by RMSE was Linear Regression as it produced the lowest RMSE of all four models, so overall it was the best-performing model. This was followed closely by Ridge Regression, Random Forest third, and KNN Regression having the weakest performance. These results suggest that the relationship between selected predictors and the performance index was captured well by a linear model._*
+
+```{r}
+prediction <- list(
+  "Linear Regression" = lm_prediction,
+  "KNN Regression" = knn_prediction,
+  "Ridge Regression" = ridge_prediction,
+  "Random Forest" = rf_prediction)
+
+best_model <- rmse_table$model[1]
+best_prediction <- prediction[[best_model]]
+
+best_model
+best_prediction
+```
+
+```{r}
+ggplot(best_prediction, aes(x = performance_index,
+                            y = .pred)) +
+  geom_point(alpha = 0.6) +
+  geom_abline(slope = 1, intercept = 0, color = "darkblue") +
+  labs(x = "Actual performance_index",
+       y = "Predicted performance_index",
+       title = paste("Predicted vs Actual:", best_model)
+  )
+```
+
+*_The predicted vs. actual plot for the best model showed a clear positive trend, although the model still had some difficulty with the most extreme player values._*
+
+# Conclusion
+
+After cleaning the data by removing goalkeeper statistics and filtering out players who played less than 900 minutes in the 2025-2026 season I created a composite performance index. With the composite outcome variable I compared four supervised regression models of Linear Regression, KNN Regression, Ridge Regression, and Random Forest Regression where Linear Regression performed best on the test set while KNN Regression had the weakest performance.
+
+I was surprised Linear Regression performed better than the more flexible models such as Random Forest or KNN but the results suggest that the relationship between the selected predictors and the performance index was captured well by the relatively simple linear structure. It is evident regularization did not add much improvement since Ridge Regression performed similarly to Linear Regression. 
+In terms of the limitations for this project the response variable is not a surefire measure of player quality but a constructed index based on selected statistics. Non-outfield players such as goalkeepers were not accounted for.   Additionally, the index favors attacking performances and all-around in-game contributions rather than defensive actions so it does not evaluate all positions equally. 
+
+Big picture, I plan to turn this project into a recruitment engine that teams can use to analyze which players in the top 5 European Leagues can use to fill gaps in their squad. I can increase the scope of the project with data from previous seasons testing position specific performance indices, especially defensive contributions. Even with the current limitations, the project shows that season-level soccer statistics can be used to build a performance index where regression methods predict said measure effectively.
+
+```{r, echo=FALSE, out.width="300px", fig.align="center"}
+knitr::include_graphics("../images/heungmingoat.png")
+```
