@@ -1,0 +1,67 @@
+Codebook for model.csv
+
+This codebook defines variables in the final dataset used for modeling player performance. The dataset contains season-level statistics for outfield players from the Big 5 European leagues: the response variable, performance_index, is a constructed composite measure based on selected standardized player statistics.
+
+Variable Definitions:
+
+Player
+    Player name.
+
+Nation
+    Player nationality.
+
+Pos
+    Player position.
+Common values include:
+    FW = Forward
+    MF = Midfielder
+    DF = Defender
+Combined labels such as MF,FW or DF,MF indicate players with multiple/combined listed roles.
+
+Squad
+    Club/team name.
+
+Comp
+    League/competition name.
+
+Age
+    Player age in years.
+
+Starts
+    Number of matches started.
+
+Sh
+    Total shots taken.
+
+SoT
+    Total shots on target.
+
+SoT%
+    Percentage of shots that were on target.
+
+PK
+    Penalty kicks made.
+
+PKatt
+    Penalty kicks attempted.
+
+CrdY
+    Yellow cards received.
+
+CrdR
+    Red cards received.
+
+Fls
+    Fouls committed.
+
+Crs
+    Crosses attempted.
+
+OG
+    Own goals.
+
+2CrdY
+    Second yellow cards received.
+
+performance_index
+    Constructed composite player performance measure used as the response variable in the regression models. This variable was created by standardizing and averaging selected season-level statistics: goals, assists, shots on target per 90 minutes, goals per shot, tackles won, interceptions, and fouls drawn. 
