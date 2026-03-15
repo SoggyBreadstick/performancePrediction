@@ -29,6 +29,7 @@ This project demonstrates how to:
 ### Data Source
 - Kaggle: *Football Players Stats 2025–2026*
 - Based on FBref data from the Big 5 European leagues
+- Dataset link: [Football Players Stats 2025–2026](https://www.kaggle.com/datasets/hubertsidorowicz/football-players-stats-2025-2026)
 
 ### Preprocessing
 - removed goalkeepers
